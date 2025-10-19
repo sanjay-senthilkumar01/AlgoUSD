@@ -2,48 +2,32 @@
 pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
-
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 /**
  * @title CircuitBreaker
-
- * @dev Implements rebase caps and emergency pause functionality with configurable parameters.
+ * @dev Enforces rebase caps and manages emergency pause functionality.
  */
 contract CircuitBreaker is AccessControl, Pausable {
     bytes32 public constant TIMELOCK_ROLE = keccak256("TIMELOCK_ROLE");
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     uint256 public maxRebasePercentPerEpoch; // Maximum percent allowed for rebase in a single epoch
-    uint256 public minRebaseInterval; // Minimum interval between rebases
-    uint256 public rebaseDampeningFactor; // Dampening factor to smooth rebase changes
-
-    uint256 private lastRebaseTimestamp; // Tracks the last rebase execution time
 
     event RebasePaused(bool paused);
     event CircuitBreakerTriggered();
     event MaxRebasePercentPerEpochUpdated(uint256 newMaxRebasePercent);
-    event MinRebaseIntervalUpdated(uint256 newMinInterval);
-    event RebaseDampeningFactorUpdated(uint256 newDampeningFactor);
 
-
-    constructor(
-        address admin,
-        uint256 initialMaxRebasePercentPerEpoch,
-        uint256 initialMinRebaseInterval,
-        uint256 initialRebaseDampeningFactor
-    ) {
+    constructor(address admin, uint256 initialMaxRebasePercentPerEpoch) {
         _grantRole(ADMIN_ROLE, admin);
         _grantRole(TIMELOCK_ROLE, admin);
 
         maxRebasePercentPerEpoch = initialMaxRebasePercentPerEpoch;
-        minRebaseInterval = initialMinRebaseInterval;
-        rebaseDampeningFactor = initialRebaseDampeningFactor;
     }
 
     /**
-
-
-     * @dev Updates maximum rebase percentage per epoch (Time-locked setter).
+     * @dev Updates the maximum rebase percentage per epoch (requires TIMELOCK_ROLE).
+     * @param newMaxRebasePercent The new maximum percentage for rebases.
      */
     function updateMaxRebasePercentPerEpoch(uint256 newMaxRebasePercent) external onlyRole(TIMELOCK_ROLE) {
         require(newMaxRebasePercent > 0, "Invalid rebase percentage");
@@ -52,55 +36,54 @@ contract CircuitBreaker is AccessControl, Pausable {
     }
 
     /**
-
-     * @dev Updates minimum rebase interval (Time-locked setter).
+     * @dev Updates the maximum rebase percentage dynamically (requires ADMIN_ROLE or TIMELOCK_ROLE based on governance process).
+     * @param newMaxRebasePercent The new maximum percentage for rebases.
+     * @param viaGovernance Boolean value indicating whether the update is via governance.
      */
+    function updateMaxRebasePercentDynamic(uint256 newMaxRebasePercent, bool viaGovernance) external {
+        if (viaGovernance) {
+            require(hasRole(TIMELOCK_ROLE, msg.sender), "Caller is not authorized via governance");
+        } else {
+            require(hasRole(ADMIN_ROLE, msg.sender), "Caller is not authorized as admin");
+        }
 
-
-
-    function updateMinRebaseInterval(uint256 newMinInterval) external onlyRole(TIMELOCK_ROLE) {
-        require(newMinInterval > 0, "Invalid rebase interval");
-        minRebaseInterval = newMinInterval;
-        emit MinRebaseIntervalUpdated(newMinInterval);
+        require(newMaxRebasePercent > 0 && newMaxRebasePercent <= 50, "Invalid dynamic range");
+        maxRebasePercentPerEpoch = newMaxRebasePercent;
+        emit MaxRebasePercentPerEpochUpdated(newMaxRebasePercent);
     }
 
     /**
-
-     * @dev Updates rebase dampening factor (Time-locked setter).
+     * @dev Pauses rebase functionality (requires TIMELOCK_ROLE).
      */
-
-
-
-    function updateRebaseDampeningFactor(uint256 newDampeningFactor) external onlyRole(TIMELOCK_ROLE) {
-        require(newDampeningFactor > 0, "Invalid dampening factor");
-        rebaseDampeningFactor = newDampeningFactor;
-        emit RebaseDampeningFactorUpdated(newDampeningFactor);
+    function pauseRebase() external onlyRole(TIMELOCK_ROLE) {
+        _pause();
+        emit RebasePaused(true);
     }
 
     /**
-
-
-     * @dev Enforces rebase limits based on interval.
-     * Emits an error if the minimum interval has not passed.
+     * @dev Unpauses rebase functionality (requires TIMELOCK_ROLE).
      */
+    function unpauseRebase() external onlyRole(TIMELOCK_ROLE) {
+        _unpause();
+        emit RebasePaused(false);
+    }
 
+    /**
+     * @dev Triggers a circuit breaker for emergency situations.
+     * This pauses all operations on the contract.
+     */
+    function emergencyPause() external onlyRole(ADMIN_ROLE) {
+        _pause();
+        emit CircuitBreakerTriggered();
+    }
 
-
-    function enforceRebaseInterval() external view whenNotPaused returns (bool) {
-        require(block.timestamp >= lastRebaseTimestamp + minRebaseInterval, "Rebase interval not met");
+    /**
+     * @dev Ensures the rebase percentage does not exceed the configured maximum.
+     * Can only be used internally.
+     * @param rebasePercent Proposed percentage for rebase.
+     */
+    function enforceRebaseCap(uint256 rebasePercent) external view whenNotPaused returns (bool) {
+        require(rebasePercent <= maxRebasePercentPerEpoch, "Rebase exceeds max allowed percent");
         return true;
-    }
-
-    /**
-
-
-
-     * @dev Updates last rebase timestamp.
-     */
-
-
-
-    function updateLastRebaseTimestamp() external onlyRole(TIMELOCK_ROLE) {
-        lastRebaseTimestamp = block.timestamp;
     }
 }

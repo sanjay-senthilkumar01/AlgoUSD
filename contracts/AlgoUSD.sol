@@ -19,17 +19,10 @@ contract AlgoUSD is ERC20, AccessControl, Pausable {
     CircuitBreaker public circuitBreaker;
     uint256 public targetPrice = 1 ether; // Target price of $1 per token (scaled)
 
-    uint256 public minRebaseInterval; // Minimum interval between rebase operations.
-    uint256 public maxRebasePercentPerEpoch; // Maximum rebase percentage allowed in a single epoch.
-    uint256 public rebaseDampeningFactor; // Dampening factor to smooth changes over epochs.
-
-    uint256 private lastRebaseTimestamp;
-
     event TargetPriceUpdated(uint256 newTargetPrice);
     event RebaseFailed(string reason);
     event MintExecuted(address to, uint256 amount);
     event BurnExecuted(address from, uint256 amount);
-    event RebaseConfigurationUpdated(uint256 minInterval, uint256 maxPercent, uint256 dampening);
 
     /**
      * @dev Constructor of the AUSD token
@@ -50,48 +43,24 @@ contract AlgoUSD is ERC20, AccessControl, Pausable {
         _grantRole(TIMELOCK_ROLE, initialOwner);
     }
 
-
-
-
-
-
-
-
-
-        // Set safe initial rebase parameters
-        minRebaseInterval = 86400; // 1 day
-        maxRebasePercentPerEpoch = 5; // Maximum 5% per epoch
-        rebaseDampeningFactor = 2; // Reduce rebase impact by 50%
-
-        lastRebaseTimestamp = block.timestamp;
+    /**
+     * @dev Mint tokens (only callable through Timelock/Multisig).
+     * @param to Address to receive minted tokens.
+     * @param amount Amount of tokens to mint.
+     */
+    function mint(address to, uint256 amount) external onlyRole(TIMELOCK_ROLE) whenNotPaused {
+        _mint(to, amount);
+        emit MintExecuted(to, amount);
     }
 
     /**
-
-
-
-     * @dev Updates rebase configuration parameters (requires ADMIN_ROLE).
-     * @param minInterval Minimum interval between successive rebases.
-     * @param maxPercent Maximum rebase percentage allowed per epoch.
-     * @param dampening Dampening factor for rebases.
+     * @dev Burn tokens (only callable through Timelock/Multisig).
+     * @param from Address to burn tokens from.
+     * @param amount Amount of tokens to burn.
      */
-
-
-
-    function updateRebaseParameters(
-        uint256 minInterval,
-        uint256 maxPercent,
-        uint256 dampening
-    ) external onlyRole(ADMIN_ROLE) {
-        require(minInterval > 0, "Min rebase interval must be positive.");
-        require(maxPercent > 0 && maxPercent <= 100, "Invalid max rebase percent.");
-        require(dampening > 0 && dampening <= 100, "Invalid dampening factor.");
-
-        minRebaseInterval = minInterval;
-        maxRebasePercentPerEpoch = maxPercent;
-        rebaseDampeningFactor = dampening;
-
-        emit RebaseConfigurationUpdated(minInterval, maxPercent, dampening);
+    function burn(address from, uint256 amount) external onlyRole(TIMELOCK_ROLE) whenNotPaused {
+        _burn(from, amount);
+        emit BurnExecuted(from, amount);
     }
 
     /**
@@ -99,11 +68,6 @@ contract AlgoUSD is ERC20, AccessControl, Pausable {
      * Fetches price from OracleAggregator and applies rebase.
      */
     function rebase() external onlyRole(TIMELOCK_ROLE) whenNotPaused {
-        require(
-            block.timestamp >= lastRebaseTimestamp + minRebaseInterval,
-            "Rebase interval has not elapsed."
-        );
-
         uint256 price;
         try oracleAggregator.getAggregatedPrice() returns (uint256 fetchedPrice) {
             price = fetchedPrice;
@@ -120,27 +84,21 @@ contract AlgoUSD is ERC20, AccessControl, Pausable {
         uint256 rebasePercent;
 
         if (price > targetPrice) {
-
-
-            // Calculate percentage increase with dampening
-            rebasePercent = (((price - targetPrice) * 100) / targetPrice) / rebaseDampeningFactor;
+            // Calculate percentage increase
+            rebasePercent = ((price - targetPrice) * 100) / targetPrice;
             circuitBreaker.enforceRebaseCap(rebasePercent);
 
             uint256 excessSupply = totalSupply() * rebasePercent / 100;
             _mint(address(this), excessSupply);
 
         } else if (price < targetPrice) {
-
-
-            // Calculate percentage decrease with dampening
-            rebasePercent = (((targetPrice - price) * 100) / targetPrice) / rebaseDampeningFactor;
+            // Calculate percentage decrease
+            rebasePercent = ((targetPrice - price) * 100) / targetPrice;
             circuitBreaker.enforceRebaseCap(rebasePercent);
 
             uint256 requiredBurn = totalSupply() * rebasePercent / 100;
             _burn(address(this), requiredBurn);
         }
-
-        lastRebaseTimestamp = block.timestamp;
 
         emit TargetPriceUpdated(targetPrice);
     }

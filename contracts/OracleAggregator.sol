@@ -72,7 +72,7 @@ contract OracleAggregator is AccessControl {
         uint8 decimals = feed.decimals();
     }
 
-      @dev Returns the aggregated price using median logic.
+     * @dev Returns the aggregated price using median logic.
      * Filters out stale data and applies outlier rejection.
     /**
      */
