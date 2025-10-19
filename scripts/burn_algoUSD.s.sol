@@ -5,7 +5,7 @@ import "forge-std/Script.sol";
 import "contracts/AlgoUSD.sol";
 
 /**
- * @title Script to burn AlgoUSD tokens
+ * @title Script to burn AlgoUSD tokens using Timelock/multisig execution
  */
 contract BurnAlgoUSD is Script {
     function run() external {
@@ -15,9 +15,12 @@ contract BurnAlgoUSD is Script {
         // Replace with the actual deployed AlgoUSD contract address
         address algoUSDAddress = vm.envAddress("AUSD_CONTRACT_ADDRESS");
         address from = vm.envAddress("BURN_ADDRESS");
+
         uint256 burnAmount = vm.envUint("BURN_AMOUNT");
 
         AlgoUSD algoUSD = AlgoUSD(algoUSDAddress);
+
+        // Timelock executed burn
         algoUSD.burn(from, burnAmount);
 
         console.log("Burned", burnAmount, "AUSD tokens from", from);

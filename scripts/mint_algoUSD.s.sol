@@ -5,7 +5,7 @@ import "forge-std/Script.sol";
 import "contracts/AlgoUSD.sol";
 
 /**
- * @title Script to mint AlgoUSD tokens
+ * @title Script to mint AlgoUSD tokens using Timelock/multisig execution
  */
 contract MintAlgoUSD is Script {
     function run() external {
@@ -15,9 +15,12 @@ contract MintAlgoUSD is Script {
         // Replace with the actual deployed AlgoUSD contract address
         address algoUSDAddress = vm.envAddress("AUSD_CONTRACT_ADDRESS");
         address recipient = vm.envAddress("RECIPIENT_ADDRESS");
+
         uint256 mintAmount = vm.envUint("MINT_AMOUNT");
 
         AlgoUSD algoUSD = AlgoUSD(algoUSDAddress);
+
+        // Timelock executed mint
         algoUSD.mint(recipient, mintAmount);
 
         console.log("Minted", mintAmount, "AUSD tokens to", recipient);

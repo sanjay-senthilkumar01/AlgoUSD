@@ -4,22 +4,23 @@ pragma solidity ^0.8.18;
 import "forge-std/Script.sol";
 import "contracts/AlgoUSD.sol";
 import "@openzeppelin/contracts/access/TimelockController.sol";
+import "contracts/OracleAggregator.sol";
+import "contracts/CircuitBreaker.sol";
 
 /**
- * @title Script to deploy AlgoUSD contract with TimelockController
+ * @title Script to deploy AlgoUSD contract with TimelockController and OracleAggregator
  */
-contract DeployAlgoUSD is Script {
+contract DeployAlgoUSDWithAggregator is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
-        // Replace with the actual Chainlink Price Feed address
-        address priceFeedAddress = vm.envAddress("PRICE_FEED_ADDRESS");
+        // Chainlink Price Feed and Admin Configuration
+        address priceFeedAddress1 = vm.envAddress("PRICE_FEED_ADDRESS_1");
+        address priceFeedAddress2 = vm.envAddress("PRICE_FEED_ADDRESS_2");
+        address adminAddress = vm.envAddress("ADMIN_ADDRESS");
 
-        // Replace with the initial owner address
-        address initialOwner = vm.envAddress("INITIAL_OWNER_ADDRESS");
-
-        // Multisig and timelock configuration
+        // Multisig addresses for the TimelockController
         address[] memory proposers = new address[](3);
         proposers[0] = vm.envAddress("MULTISIG_SIGNER_1");
         proposers[1] = vm.envAddress("MULTISIG_SIGNER_2");
@@ -38,10 +39,24 @@ contract DeployAlgoUSD is Script {
             executors
         );
 
-        // Deploy AlgoUSD contract with price feed address and timelock settings
-        AlgoUSD algoUSD = new AlgoUSD(priceFeedAddress, timelockAdmin);
+        // Deploy CircuitBreaker
+        CircuitBreaker circuitBreaker = new CircuitBreaker(timelockAdmin, 10); // Max 10% rebase cap
+
+        // Deploy OracleAggregator
+        OracleAggregator oracleAggregator = new OracleAggregator(
+            3600, // Staleness threshold: 1 hour
+            adminAddress
+        );
+
+        oracleAggregator.addPriceFeed(priceFeedAddress1, false); // Primary feed
+        oracleAggregator.addPriceFeed(priceFeedAddress2, true);  // Fallback feed
+
+        // Deploy AlgoUSD contract with OracleAggregator and CircuitBreaker integration
+        AlgoUSD algoUSD = new AlgoUSD(address(oracleAggregator), address(circuitBreaker), timelockAdmin);
 
         console.log("AlgoUSD deployed to:", address(algoUSD));
+        console.log("OracleAggregator deployed to:", address(oracleAggregator));
+        console.log("CircuitBreaker deployed to:", address(circuitBreaker));
         console.log("TimelockController deployed to:", address(timelockController));
 
         vm.stopBroadcast();

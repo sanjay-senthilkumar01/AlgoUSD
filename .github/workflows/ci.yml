@@ -1,0 +1,113 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+      - prod/*
+  pull_request:
+    branches:
+      - main
+      - prod/*
+
+jobs:
+  linter:
+    name: Run Solhint Linter (Solidity)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install Solhint
+        run: npm install -g solhint
+
+      - name: Run Solhint
+        run: solhint "contracts/**/*.sol"
+
+  foundry-tests:
+    name: Run Foundry Solidity Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Foundry
+        run: |
+          curl -L https://foundry.paradigm.xyz | bash
+          foundryup
+
+      - name: Run Foundry Tests
+        run: forge test --coverage --match-path tests/**/*.t.sol
+
+  hardhat-tests:
+    name: Run Hardhat Solidity Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Hardhat Tests
+        run: npx hardhat test
+
+  typescript-tests:
+    name: Run TypeScript Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run TypeScript Tests
+        run: npm test
+
+  static-analysis:
+    name: Run Slither Static Analysis for Solidity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+
+      - name: Install Slither
+        run: |
+          python -m pip install --upgrade pip
+          pip install slither-analyzer
+
+      - name: Run Slither Analysis
+        run: slither .
+
+  block-merge-if-fails:
+    name: Verify CI Success for Merge
+    needs:
+      - linter
+      - foundry-tests
+      - hardhat-tests
+      - typescript-tests
+      - static-analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure all checks passed
+        run: |
+          echo "All checks passed. Merging allowed."

@@ -3,86 +3,151 @@ pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/governance/TimelockController.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import "contracts/CircuitBreaker.sol";
+import "contracts/OracleAggregator.sol";
 
 /**
  * @title AlgoUSD (AUSD)
- * @dev ERC20 token pegged to USD with multisig and timelock protections
+ * @dev ERC20 token pegged to USD using a smart contract algorithm
  */
-contract AlgoUSD is ERC20, AccessControl, Pausable, UUPSUpgradeable {
+contract AlgoUSD is ERC20, AccessControl, Pausable {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant TIMELOCK_ROLE = keccak256("TIMELOCK_ROLE");
 
-    TimelockController public timelockController;
+    OracleAggregator public oracleAggregator;
+    CircuitBreaker public circuitBreaker;
     uint256 public targetPrice = 1 ether; // Target price of $1 per token (scaled)
 
+    uint256 public minRebaseInterval; // Minimum interval between rebase operations.
+    uint256 public maxRebasePercentPerEpoch; // Maximum rebase percentage allowed in a single epoch.
+    uint256 public rebaseDampeningFactor; // Dampening factor to smooth changes over epochs.
+
+    uint256 private lastRebaseTimestamp;
+
     event TargetPriceUpdated(uint256 newTargetPrice);
+    event RebaseFailed(string reason);
+    event MintExecuted(address to, uint256 amount);
+    event BurnExecuted(address from, uint256 amount);
+    event RebaseConfigurationUpdated(uint256 minInterval, uint256 maxPercent, uint256 dampening);
 
     /**
      * @dev Constructor of the AUSD token
-     * @param priceFeedAddress The address of the Chainlink price feed contract
-     * @param timelockAdmin Address of the timelock admin
-     * @param proposers Array of proposer addresses for the timelock
-     * @param executors Array of executor addresses who can execute operations
+     * @param oracleAggregatorAddress Address of the OracleAggregator contract
+     * @param circuitBreakerAddress Address of the CircuitBreaker contract
+     * @param initialOwner The initial admin address
      */
     constructor(
-        address priceFeedAddress,
-        address timelockAdmin,
-        address[] memory proposers,
-        address[] memory executors
+        address oracleAggregatorAddress,
+        address circuitBreakerAddress,
+        address initialOwner
     ) ERC20("AlgoUSD", "AUSD") {
-        timelockController = new TimelockController(
-            2 days, // Default minimum delay
-            proposers, // Proposers
-            executors // Executors
+        oracleAggregator = OracleAggregator(oracleAggregatorAddress);
+        circuitBreaker = CircuitBreaker(circuitBreakerAddress);
+
+        _grantRole(ADMIN_ROLE, initialOwner);
+        _grantRole(DEFAULT_ADMIN_ROLE, initialOwner);
+        _grantRole(TIMELOCK_ROLE, initialOwner);
+    }
+
+
+
+
+
+
+
+
+
+        // Set safe initial rebase parameters
+        minRebaseInterval = 86400; // 1 day
+        maxRebasePercentPerEpoch = 5; // Maximum 5% per epoch
+        rebaseDampeningFactor = 2; // Reduce rebase impact by 50%
+
+        lastRebaseTimestamp = block.timestamp;
+    }
+
+    /**
+
+
+
+     * @dev Updates rebase configuration parameters (requires ADMIN_ROLE).
+     * @param minInterval Minimum interval between successive rebases.
+     * @param maxPercent Maximum rebase percentage allowed per epoch.
+     * @param dampening Dampening factor for rebases.
+     */
+
+
+
+    function updateRebaseParameters(
+        uint256 minInterval,
+        uint256 maxPercent,
+        uint256 dampening
+    ) external onlyRole(ADMIN_ROLE) {
+        require(minInterval > 0, "Min rebase interval must be positive.");
+        require(maxPercent > 0 && maxPercent <= 100, "Invalid max rebase percent.");
+        require(dampening > 0 && dampening <= 100, "Invalid dampening factor.");
+
+        minRebaseInterval = minInterval;
+        maxRebasePercentPerEpoch = maxPercent;
+        rebaseDampeningFactor = dampening;
+
+        emit RebaseConfigurationUpdated(minInterval, maxPercent, dampening);
+    }
+
+    /**
+     * @dev Adjust token supply to maintain the peg.
+     * Fetches price from OracleAggregator and applies rebase.
+     */
+    function rebase() external onlyRole(TIMELOCK_ROLE) whenNotPaused {
+        require(
+            block.timestamp >= lastRebaseTimestamp + minRebaseInterval,
+            "Rebase interval has not elapsed."
         );
-        timelockController.grantRole(timelockController.TIMELOCK_ADMIN_ROLE(), timelockAdmin);
-        timelockController.grantRole(TIMELOCK_ROLE, address(timelockController));
-        timelockController.grantRole(ADMIN_ROLE, timelockAdmin);
-        _grantRole(ADMIN_ROLE, msg.sender);
-    }
 
-    /**
-     * @dev Public function to mint tokens with multisig and timelock protection
-     * @param to Address to receive minted tokens
-     * @param amount Amount of tokens to mint
-     */
-    function mint(address to, uint256 amount) external onlyRole(TIMELOCK_ROLE) whenNotPaused {
-        _mint(to, amount);
-    }
+        uint256 price;
+        try oracleAggregator.getAggregatedPrice() returns (uint256 fetchedPrice) {
+            price = fetchedPrice;
+        } catch {
+            emit RebaseFailed("OracleAggregator failed to fetch price");
+            return;
+        }
 
-    /**
-     * @dev Public function to burn tokens with multisig and timelock protection
-     * @param from Address to burn tokens from
-     * @param amount Amount of tokens to burn
-     */
-    function burn(address from, uint256 amount) external onlyRole(TIMELOCK_ROLE) whenNotPaused {
-        _burn(from, amount);
-    }
+        if (price == 0) {
+            emit RebaseFailed("Fetched price is zero");
+            return;
+        }
 
-    /**
-     * @dev Adjust token supply to maintain the peg with timelock protection
-     * @param price Current price of AUSD from an external price feed.
-     */
-    function rebase(uint256 price) external onlyRole(TIMELOCK_ROLE) whenNotPaused {
-        require(price > 0, "Invalid price value");
+        uint256 rebasePercent;
 
         if (price > targetPrice) {
-            uint256 excessSupply = totalSupply() * (price - targetPrice) / targetPrice;
+
+
+            // Calculate percentage increase with dampening
+            rebasePercent = (((price - targetPrice) * 100) / targetPrice) / rebaseDampeningFactor;
+            circuitBreaker.enforceRebaseCap(rebasePercent);
+
+            uint256 excessSupply = totalSupply() * rebasePercent / 100;
             _mint(address(this), excessSupply);
+
         } else if (price < targetPrice) {
-            uint256 requiredBurn = totalSupply() * (targetPrice - price) / targetPrice;
+
+
+            // Calculate percentage decrease with dampening
+            rebasePercent = (((targetPrice - price) * 100) / targetPrice) / rebaseDampeningFactor;
+            circuitBreaker.enforceRebaseCap(rebasePercent);
+
+            uint256 requiredBurn = totalSupply() * rebasePercent / 100;
             _burn(address(this), requiredBurn);
         }
+
+        lastRebaseTimestamp = block.timestamp;
 
         emit TargetPriceUpdated(targetPrice);
     }
 
     /**
-     * @dev Updates the target price with timelock protection
-     * @param newTargetPrice The new target price
+     * @dev Updates the target price for the stablecoin (requires TIMELOCK_ROLE).
+     * @param newTargetPrice The new target price.
      */
     function setTargetPrice(uint256 newTargetPrice) external onlyRole(TIMELOCK_ROLE) whenNotPaused {
         require(newTargetPrice > 0, "Price must be greater than zero");
@@ -92,21 +157,16 @@ contract AlgoUSD is ERC20, AccessControl, Pausable, UUPSUpgradeable {
     }
 
     /**
-     * @dev Pause contract in case of emergency
+     * @dev Pauses contract actions for emergency.
      */
     function pause() external onlyRole(ADMIN_ROLE) whenNotPaused {
-        _pause();
+        circuitBreaker.emergencyPause();
     }
 
     /**
-     * @dev Unpause contract
+     * @dev Unpauses contract actions.
      */
     function unpause() external onlyRole(ADMIN_ROLE) whenPaused {
-        _unpause();
+        circuitBreaker.unpauseRebase();
     }
-
-    /**
-     * @dev Required override for UUPS proxy pattern
-     */
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(ADMIN_ROLE) {}
 }
