@@ -1,0 +1,8 @@
+# This file sets ownership for file paths in the repository
+
+# Owners of the entire repository
+*  @sanjay-senthilkumar01
+
+# Owners for specific files or directories
+/contracts/  @sanjay-senthilkumar01
+/scripts/ @sanjay-senthilkumar01
