@@ -1,2 +1,1 @@
 contracts/=contracts/
-@chainlink/=/node_modules/@chainlink/

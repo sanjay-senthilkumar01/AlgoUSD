@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /**
  * @title AlgoUSD (AUSD)
@@ -17,8 +17,12 @@ contract AlgoUSD is ERC20, Ownable {
     /**
      * @dev Constructor of the AUSD token
      * @param priceFeedAddress The address of the Chainlink price feed contract
+     * @param initialOwner The initial owner of the contract
      */
-    constructor(address priceFeedAddress) ERC20("AlgoUSD", "AUSD") {
+    constructor(address priceFeedAddress, address initialOwner) 
+        ERC20("AlgoUSD", "AUSD") 
+        Ownable(initialOwner) 
+    {
         priceFeed = AggregatorV3Interface(priceFeedAddress);
     }
 

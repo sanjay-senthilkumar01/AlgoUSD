@@ -15,8 +15,10 @@ contract DeployAlgoUSD is Script {
         // Replace with the actual Chainlink Price Feed address
         address priceFeedAddress = vm.envAddress("PRICE_FEED_ADDRESS");
 
-        // Deploy AlgoUSD contract
-        AlgoUSD algoUSD = new AlgoUSD(priceFeedAddress);
+        // Replace with the owner address
+        address initialOwner = vm.envAddress("INITIAL_OWNER_ADDRESS");
+        // Deploy AlgoUSD contract with constructor arguments
+        AlgoUSD algoUSD = new AlgoUSD(priceFeedAddress, initialOwner);
 
         console.log("AlgoUSD deployed to:", address(algoUSD));
 
